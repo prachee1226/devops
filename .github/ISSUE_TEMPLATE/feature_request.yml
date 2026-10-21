@@ -1,0 +1,20 @@
+name: Feature Request
+description: Propose a new capability or enhancement for Ambulance Dispatch operations
+title: "[FEAT] <Feature Title>"
+labels: ["enhancement", "mvp-backlog"]
+assignees: ["prachee-wakode"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Clinical Need
+      description: What operational gap or user pain point does this feature solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Implementation / User Story
+      description: As a [role], I want to [action], so that [business value].
+    validations:
+      required: true

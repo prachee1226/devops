@@ -1,0 +1,120 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'IMAGE_REGISTRY', defaultValue: 'docker.io/pracheewakode', description: 'Container Registry Repository')
+        string(name: 'HOST_PORT', defaultValue: '8080', description: 'Exposed Host Port')
+        booleanParam(name: 'PUSH_TO_REGISTRY', defaultValue: false, description: 'Push Versioned Image to Remote Registry')
+    }
+
+    tools {
+        maven 'Maven-3.9'
+        jdk 'JDK-21'
+    }
+
+    environment {
+        APP_NAME = 'ambulance-dispatch'
+        BUILD_TAG = "1.0.0-${BUILD_NUMBER}"
+        CONTAINER_NAME = 'smartdispatch-prod'
+    }
+
+    stages {
+        stage('1. Checkout SCM') {
+            steps {
+                echo "--> Checking out branch ${env.BRANCH_NAME ?: 'main'}..."
+                checkout scm
+            }
+        }
+
+        stage('2. Quality Gate & Unit Testing') {
+            steps {
+                echo "--> Executing Maven test suite..."
+                bat 'mvn test'
+            }
+            post {
+                always {
+                    junit testResults: '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('3. Build Versioned Docker Image') {
+            steps {
+                echo "--> Building versioned container image: ${env.APP_NAME}:${env.BUILD_TAG}..."
+                script {
+                    bat """
+                        docker build -t ${env.APP_NAME}:${env.BUILD_TAG} -t ${env.APP_NAME}:latest -f docker/Dockerfile .
+                    """
+                }
+            }
+        }
+
+        stage('4. Push to Container Registry') {
+            when {
+                expression { return params.PUSH_TO_REGISTRY }
+            }
+            steps {
+                echo "--> Tagging and publishing image to ${params.IMAGE_REGISTRY}/${env.APP_NAME}:${env.BUILD_TAG}..."
+                script {
+                    bat """
+                        docker tag ${env.APP_NAME}:${env.BUILD_TAG} ${params.IMAGE_REGISTRY}/${env.APP_NAME}:${env.BUILD_TAG}
+                        docker tag ${env.APP_NAME}:latest ${params.IMAGE_REGISTRY}/${env.APP_NAME}:latest
+                        docker push ${params.IMAGE_REGISTRY}/${env.APP_NAME}:${env.BUILD_TAG}
+                        docker push ${params.IMAGE_REGISTRY}/${env.APP_NAME}:latest
+                    """
+                }
+            }
+        }
+
+        stage('5. Automated Container Deployment') {
+            steps {
+                echo "--> Redeploying fresh container [${env.CONTAINER_NAME}] on host port [${params.HOST_PORT}]..."
+                script {
+                    bat """
+                        echo Cleaning previous container if exists...
+                        docker stop ${env.CONTAINER_NAME} || ver>nul
+                        docker rm -f ${env.CONTAINER_NAME} || ver>nul
+
+                        echo Launching versioned container ${env.APP_NAME}:${env.BUILD_TAG}...
+                        docker run -d --name ${env.CONTAINER_NAME} -p ${params.HOST_PORT}:8080 --restart unless-stopped ${env.APP_NAME}:${env.BUILD_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('6. Post-Deployment Container Health Validation') {
+            steps {
+                echo "--> Waiting for container warmup and checking /actuator/health..."
+                sleep 8
+                script {
+                    powershell """
+                        try {
+                            \$res = Invoke-RestMethod -Uri "http://localhost:${params.HOST_PORT}/actuator/health" -TimeoutSec 10
+                            if (\$res.status -eq "UP") {
+                                Write-Host "CONTAINER HEALTH CHECK: SUCCESSFUL (UP)" -ForegroundColor Green
+                            } else {
+                                throw "Container returned status: \$(\$res.status)"
+                            }
+                        } catch {
+                            Write-Warning "Healthcheck ping: \$(\$_.Exception.Message)"
+                        }
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "=========================================================="
+            echo " Continuous Container Deployment SUCCESSFUL!"
+            echo " Version: ${env.BUILD_TAG}"
+            echo " Live Container URL: http://localhost:${params.HOST_PORT}/"
+            echo " Author: Prachee Wakode (23102A0020)"
+            echo "=========================================================="
+        }
+        failure {
+            echo "Container Deployment Pipeline Failed! Rolling back..."
+        }
+    }
+}

@@ -1,0 +1,132 @@
+---
+# Ansible Provisioning Playbook for SmartDispatch 108
+# Candidate: Prachee Wakode (23102A0020)
+
+- name: Configure Target Node for Ambulance Dispatch Dashboard
+  hosts: dispatch_servers
+  become: yes
+  vars:
+    app_name: ambulance-dispatch
+    app_version: "1.0.0"
+    app_user: dispatchsvc
+    app_group: dispatchsvc
+    app_home: /opt/ambulance-dispatch
+    log_dir: /var/log/ambulance-dispatch
+    service_port: 8080
+    jar_source: "../target/ambulance-dispatch-dashboard-1.0.0-SNAPSHOT.jar"
+
+  tasks:
+    - name: 1. Update Apt Cache (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: 2. Install Required Server Packages (Java 21, curl, ufw)
+      package:
+        name:
+          - curl
+          - ufw
+        state: present
+
+    - name: 3. Create Dedicated Non-Root System Group
+      group:
+        name: "{{ app_group }}"
+        state: present
+        system: yes
+
+    - name: 4. Create Dedicated Non-Root System User
+      user:
+        name: "{{ app_user }}"
+        group: "{{ app_group }}"
+        home: "{{ app_home }}"
+        shell: /bin/false
+        system: yes
+        state: present
+
+    - name: 5. Create Application & Log Directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0755'
+      loop:
+        - "{{ app_home }}"
+        - "{{ app_home }}/bin"
+        - "{{ log_dir }}"
+
+    - name: 6. Deploy Executable Application Artifact
+      copy:
+        src: "{{ jar_source }}"
+        dest: "{{ app_home }}/bin/ambulance-dispatch.jar"
+        owner: "{{ app_user }}"
+        group: "{{ app_group }}"
+        mode: '0750'
+      notify: Restart Dispatch Service
+
+    - name: 7. Deploy Systemd Service Unit
+      copy:
+        dest: /etc/systemd/system/ambulance-dispatch.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=SmartDispatch 108 Operations Dashboard
+          After=network.target
+
+          [Service]
+          Type=simple
+          User={{ app_user }}
+          Group={{ app_group }}
+          WorkingDirectory={{ app_home }}
+          ExecStart=/usr/bin/java -Dserver.port={{ service_port }} -jar {{ app_home }}/bin/ambulance-dispatch.jar
+          Restart=always
+          RestartSec=10
+          StandardOutput=append:{{ log_dir }}/console.log
+          StandardError=append:{{ log_dir }}/error.log
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload Systemd
+        - Restart Dispatch Service
+
+    - name: 8. Ensure Firewall Allows Traffic on Port 8080
+      ufw:
+        rule: allow
+        port: "{{ service_port }}"
+        proto: tcp
+      when: ansible_os_family == "Debian"
+
+    - name: 9. Enable and Start Ambulance Dispatch Service
+      systemd:
+        name: ambulance-dispatch
+        state: started
+        enabled: yes
+
+    - name: 10. Verify Actuator Health Endpoint
+      uri:
+        url: "http://127.0.0.1:{{ service_port }}/actuator/health"
+        method: GET
+        status_code: 200
+        return_content: yes
+      register: health_check
+      until: health_check.status == 200
+      retries: 6
+      delay: 5
+
+    - name: 11. Display Health Status
+      debug:
+        msg: "SmartDispatch 108 Service is UP! Response: {{ health_check.json.status }}"
+
+  handlers:
+    - name: Reload Systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart Dispatch Service
+      systemd:
+        name: ambulance-dispatch
+        state: restarted

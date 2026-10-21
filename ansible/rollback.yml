@@ -1,0 +1,52 @@
+---
+# Ansible Rollback Playbook for SmartDispatch 108
+# Candidate: Prachee Wakode (23102A0020)
+
+- name: Emergency Rollback to Previous Stable Release
+  hosts: dispatch_servers
+  become: yes
+  vars:
+    app_home: /opt/ambulance-dispatch
+    backup_jar: "/opt/ambulance-dispatch/bin/ambulance-dispatch.jar.backup"
+    active_jar: "/opt/ambulance-dispatch/bin/ambulance-dispatch.jar"
+    service_port: 8080
+
+  tasks:
+    - name: 1. Verify Stable Backup Artifact Exists
+      stat:
+        path: "{{ backup_jar }}"
+      register: backup_stat
+      failed_when: not backup_stat.stat.exists
+
+    - name: 2. Stop Degraded Application Service
+      systemd:
+        name: ambulance-dispatch
+        state: stopped
+
+    - name: 3. Restore Previous Stable Artifact
+      copy:
+        src: "{{ backup_jar }}"
+        dest: "{{ active_jar }}"
+        remote_src: yes
+        owner: dispatchsvc
+        group: dispatchsvc
+        mode: '0750'
+
+    - name: 4. Restart Service with Restored Artifact
+      systemd:
+        name: ambulance-dispatch
+        state: started
+
+    - name: 5. Verify Rollback Service Health
+      uri:
+        url: "http://127.0.0.1:{{ service_port }}/actuator/health"
+        method: GET
+        status_code: 200
+      register: rollback_health
+      until: rollback_health.status == 200
+      retries: 5
+      delay: 4
+
+    - name: 6. Confirm Successful Rollback Recovery
+      debug:
+        msg: "SUCCESS: Rollback complete. SmartDispatch 108 restored to previous release (Health: UP)."
