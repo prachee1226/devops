@@ -16,12 +16,12 @@ while ($attempt -le $MaxRetries) {
     try {
         $res = Invoke-RestMethod -Uri "${HostUrl}/actuator/health" -TimeoutSec 5
         if ($res.status -eq "UP") {
-            Write-Host "✅ Health Check PASSED on Attempt $attempt: System is UP" -ForegroundColor Green
+            Write-Host "✅ Health Check PASSED on Attempt ${attempt}: System is UP" -ForegroundColor Green
             $healthy = $true
             break
         }
     } catch {
-        Write-Host "⏳ Attempt $attempt of $MaxRetries: Server starting up..." -ForegroundColor Yellow
+        Write-Host "⏳ Attempt ${attempt} of ${MaxRetries}: Server starting up..." -ForegroundColor Yellow
         Start-Sleep -Seconds $DelaySeconds
         $attempt++
     }
