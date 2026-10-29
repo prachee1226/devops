@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Student Name:** Prachee Wakode  
-**PRN / Roll No:** 23102A0020 / Roll 19  
+**Roll No:** 23102A0020   
 **Assignment:** Jenkins Pipeline for an Ambulance Dispatch Dashboard (End-to-End 15-Milestone DevOps Project)
 
 ---
